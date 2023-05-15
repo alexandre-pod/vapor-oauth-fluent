@@ -1,49 +1,62 @@
 import VaporOAuth
-import FluentProvider
+import FluentKit
+import SQLKit
 
-extension OAuthResourceServer: Model {
+public final class FluentOAuthResourceServer: Model {
+    public static let schema = "oauth_resource_server"
 
-    struct Properties {
-        static let username =  "username"
-        static let password = "password"
-    }
+    @ID(custom: "username", generatedBy: .user)
+    public var id: String?
 
-    public var storage: Storage {
-        if let storage = extend["fluent-storage"] as? Storage {
-            return storage
-        } else {
-            let storage = Storage()
-            extend["fluent-storage"] = storage
-            return storage
-        }
-    }
+    @Field(key: "username")
+    public var username: String
 
-    public convenience init(row: Row) throws {
-        let username: String = try row.get(Properties.username)
-        let passwordAsString: String = try row.get(Properties.password)
-        self.init(username: username, password: passwordAsString.makeBytes())
-    }
+    @Field(key: "password")
+    public var password: String
 
-    public func makeRow() throws -> Row {
-        var row = Row()
-        try row.set(Properties.username, username)
-        try row.set(Properties.password, password.makeString())
-        return row
+    public init() {}
+
+    public init(username: String,
+                password: String) {
+        self.id = username
+        self.username = username
+        self.password = password
     }
 }
 
-extension OAuthResourceServer: Preparation {
-    public static func prepare(_ database: Database) throws {
-        try database.create(self) { builder in
-            builder.id()
-            builder.string(Properties.username)
-            builder.string(Properties.password)
+extension FluentOAuthResourceServer {
+    public var oAuthResourceServer: OAuthResourceServer {
+        OAuthResourceServer(
+            username: username,
+            password: password
+        )
+    }
+}
+
+extension FluentOAuthResourceServer {
+    struct Create: AsyncMigration {
+        func prepare(on database: Database) async throws {
+            try await database.schema(FluentOAuthResourceServer.schema)
+                .compositeIdentifier(over: "username")
+                .field("username", .string, .required)
+                .field("password", .string, .required)
+                .create()
+            try await (database as? SQLDatabase)?
+                .create(index: "oauth_resource_server_index")
+                .on(FluentOAuthResourceServer.schema)
+                .column("username")
+                .run()
         }
 
-        try database.index(Properties.username, for: OAuthResourceServer.self)
+        func revert(on database: Database) async throws {
+            try await (database as? SQLDatabase)?
+                .drop(index: "oauth_resource_server_index")
+                .run()
+            try await database.schema(FluentOAuthResourceServer.schema).delete()
+        }
     }
 
-    public static func revert(_ database: Database) throws {
-        try database.delete(self)
+    public static var migration: Migration {
+        Create()
     }
 }

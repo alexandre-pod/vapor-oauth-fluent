@@ -1,18 +1,28 @@
+import Vapor
+import FluentKit
 import VaporOAuth
-import FluentProvider
-import AuthProvider
 
 public struct FluentUserManager: UserManager {
 
-    public init() {}
+    private let passwordHasher: PasswordHasher
+    private let database: Database
 
-    public func authenticateUser(username: String, password: String) -> Identifier? {
-        let credentials = Password(username: username, password: password)
-        let user = try? OAuthUser.authenticate(credentials)
-        return user?.id
+    public init(passwordHasher: PasswordHasher, database: Database) {
+        self.passwordHasher = passwordHasher
+        self.database = database
     }
 
-    public func getUser(userID: Identifier) -> OAuthUser? {
-        return (try? OAuthUser.find(userID)) ?? nil
+    public func authenticateUser(username: String, password: String) async throws -> String? {
+        guard
+            let user = try await FluentOAuthUser.find(username, on: database),
+            try passwordHasher.verify(password, created: user.password)
+        else {
+            return nil
+        }
+        return user.id
+    }
+
+    public func getUser(userID: String) async throws -> OAuthUser? {
+        return try await FluentOAuthUser.find(userID, on: database)?.oAuthUser
     }
 }

@@ -1,52 +1,52 @@
-import VaporOAuth
 import Foundation
-import Crypto
-import FluentProvider
+import Vapor
+import VaporOAuth
+import FluentKit
 
 public struct FluentTokenManager: TokenManager {
 
-    public init() {}
+    private let database: Database
 
-    public func getAccessToken(_ accessToken: String) -> AccessToken? {
-        do {
-            return try AccessToken.makeQuery().filter(AccessToken.Properties.tokenString, accessToken).first()
-        } catch {
-            return nil
-        }
+    public init(database: Database) {
+        self.database = database
     }
 
-    public func getRefreshToken(_ refreshToken: String) -> RefreshToken? {
-        do {
-            return try RefreshToken.makeQuery().filter(RefreshToken.Properties.tokenString, refreshToken).first()
-        } catch {
-            return nil
-        }
+    public func getAccessToken(_ accessToken: String) async throws -> AccessToken? {
+        return try await FluentAccessToken.find(accessToken, on: database)
     }
 
-    public func generateAccessToken(clientID: String, userID: Identifier?, scopes: [String]?, expiryTime: Int) throws -> AccessToken {
-        let accessTokenString = try Random.bytes(count: 32).hexString
-        let accessToken = AccessToken(tokenString: accessTokenString, clientID: clientID, userID: userID, scopes: scopes,
-                                      expiryTime: Date().addingTimeInterval(TimeInterval(expiryTime)))
-        try accessToken.save()
+    public func getRefreshToken(_ refreshToken: String) async throws -> RefreshToken? {
+        return try await FluentRefreshToken.find(refreshToken, on: database)
+    }
+
+    public func generateAccessToken(clientID: String, userID: String?, scopes: [String]?, expiryTime: Int) async throws -> AccessToken {
+        let accessTokenString = [UInt8].random(count: 32).hex
+        let accessToken = FluentAccessToken(tokenString: accessTokenString, clientID: clientID, userID: userID,
+                                            expiryTime: Date().addingTimeInterval(TimeInterval(expiryTime)), scopes: scopes)
+        try await accessToken.save(on: database)
         return accessToken
     }
 
-    public func generateAccessRefreshTokens(clientID: String, userID: Identifier?, scopes: [String]?,
-                                            accessTokenExpiryTime: Int) throws -> (AccessToken, RefreshToken) {
-        let accessTokenString = try Random.bytes(count: 32).hexString
-        let accessToken = AccessToken(tokenString: accessTokenString, clientID: clientID, userID: userID, scopes: scopes,
-                                      expiryTime: Date().addingTimeInterval(TimeInterval(accessTokenExpiryTime)))
-        try accessToken.save()
+    public func generateAccessRefreshTokens(clientID: String, userID: String?, scopes: [String]?,
+                                            accessTokenExpiryTime: Int) async throws -> (AccessToken, RefreshToken) {
+        let accessTokenString = [UInt8].random(count: 32).hex
+        let accessToken = FluentAccessToken(tokenString: accessTokenString, clientID: clientID, userID: userID,
+                                            expiryTime: Date().addingTimeInterval(TimeInterval(accessTokenExpiryTime)),
+                                            scopes: scopes)
+        try await accessToken.save(on: database)
 
-        let refreshTokenString = try Random.bytes(count: 32).hexString
-        let refreshToken = RefreshToken(tokenString: refreshTokenString, clientID: clientID, userID: userID, scopes: scopes)
-        try refreshToken.save()
+        let refreshTokenString = [UInt8].random(count: 32).hex
+        let refreshToken = FluentRefreshToken(tokenString: refreshTokenString, clientID: clientID, userID: userID, scopes: scopes)
+        try await refreshToken.save(on: database)
 
         return (accessToken, refreshToken)
     }
 
-    public func updateRefreshToken(_ refreshToken: RefreshToken, scopes: [String]) {
+    public func updateRefreshToken(_ refreshToken: RefreshToken, scopes: [String]) async throws {
+        guard let refreshToken = try await FluentRefreshToken.find(refreshToken.tokenString, on: database) else {
+            throw Abort(.internalServerError)
+        }
         refreshToken.scopes = scopes
-        try? refreshToken.save()
+        try await refreshToken.update(on: database)
     }
 }

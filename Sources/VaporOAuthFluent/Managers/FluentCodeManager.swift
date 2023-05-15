@@ -1,28 +1,28 @@
-import FluentProvider
+import Foundation
+import FluentKit
 import VaporOAuth
-import Crypto
 
 public struct FluentCodeManager: CodeManager {
 
-    public init() {}
+    private let database: Database
 
-    public func generateCode(userID: Identifier, clientID: String, redirectURI: String, scopes: [String]?) throws -> String {
-        let codeString = try Random.bytes(count: 32).hexString
-        let fluentCode = OAuthCode(codeID: codeString, clientID: clientID, redirectURI: redirectURI, userID: userID,
-                                   expiryDate: Date().addingTimeInterval(60), scopes: scopes)
-        try fluentCode.save()
+    public init(database: Database) {
+        self.database = database
+    }
+
+    public func generateCode(userID: String, clientID: String, redirectURI: String, scopes: [String]?) async throws -> String {
+        let codeString = [UInt8].random(count: 32).hex
+        let fluentCode = FluentOAuthCode(codeID: codeString, clientID: clientID, redirectURI: redirectURI, userID: userID,
+                                         expiryDate: Date().addingTimeInterval(60), scopes: scopes)
+        try await fluentCode.save(on: database)
         return codeString
     }
 
-    public func getCode(_ code: String) -> OAuthCode? {
-        do {
-            return try OAuthCode.makeQuery().filter(OAuthCode.Properties.codeString, code).first()
-        } catch {
-            return nil
-        }
+    public func getCode(_ code: String) async throws -> OAuthCode? {
+        return try await FluentOAuthCode.find(code, on: database)?.oAuthCode
     }
 
-    public func codeUsed(_ code: OAuthCode) {
-        try? code.delete()
+    public func codeUsed(_ code: OAuthCode) async throws {
+        try await FluentOAuthCode.find(code.codeID, on: database)?.delete(on: database)
     }
 }

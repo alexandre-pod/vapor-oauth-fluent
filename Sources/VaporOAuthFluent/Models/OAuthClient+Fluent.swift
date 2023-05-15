@@ -1,93 +1,100 @@
+import Foundation
 import VaporOAuth
-import FluentProvider
+import FluentKit
+import SQLKit
 
-extension OAuthClient: Model {
+extension OAuthFlowType: Codable {}
 
-    struct Properties {
-        static let clientID = "client_id"
-        static let clientSecret = "client_secret"
-        static let redirectURIs = "redirect_uris"
-        static let scopes = "scopes"
-        static let confidentialClient = "confidential_client"
-        static let firstParty = "first_party"
-        static let allowedGrantType = "allowed_grant_type"
-    }
+public final class FluentOAuthClient: Model {
+    public static let schema = "oauth_clients"
 
-    public var storage: Storage {
-        if let storage = extend["fluent-storage"] as? Storage {
-            return storage
-        } else {
-            let storage = Storage()
-            extend["fluent-storage"] = storage
-            return storage
-        }
-    }
+    @ID(custom: "client_id", generatedBy: .user)
+    public var id: String?
 
-    public convenience init(row: Row) throws {
-        let clientID: String = try row.get(Properties.clientID)
-        let clientSecret: String? = try? row.get(Properties.clientSecret)
-        let redirectURIsString: String? = try? row.get(Properties.redirectURIs)
-        let scopeString: String? = try row.get(Properties.scopes)
-        let confidentalClient: Bool? = try? row.get(Properties.confidentialClient)
-        let firstParty: Bool = try row.get(Properties.firstParty)
-        let allowedGrantTypeString: String = try row.get(Properties.allowedGrantType)
-        let retrievedAllowedGrantType = OAuthFlowType(rawValue: allowedGrantTypeString)
-        
-        guard let allowedGrantType = retrievedAllowedGrantType else {
-            throw Abort.serverError
-        }
+    @Field(key: "client_id")
+    public var clientID: String
 
-        let scopes: [String]?
-        let redirectURIs: [String]?
+    @OptionalField(key: "redirect_uris")
+    public var redirectURIs: [String]?
 
-        if let scopeStringSet = scopeString {
-            scopes = scopeStringSet.components(separatedBy: " ")
-        } else {
-            scopes = nil
-        }
+    @OptionalField(key: "client_secret")
+    public var clientSecret: String?
 
-        if let redirectURIsSet = redirectURIsString {
-            redirectURIs = redirectURIsSet.components(separatedBy: " ")
-        } else {
-            redirectURIs = nil
-        }
+    @OptionalField(key: "scopes")
+    public var validScopes: [String]?
 
-        self.init(clientID: clientID, redirectURIs: redirectURIs, clientSecret: clientSecret, validScopes: scopes,
-                  confidential: confidentalClient, firstParty: firstParty, allowedGrantType: allowedGrantType)
-    }
+    @OptionalField(key: "confidential_client")
+    public var confidentialClient: Bool?
 
-    public func makeRow() throws -> Row {
-        var row = Row()
+    @Field(key: "first_party")
+    public var firstParty: Bool
 
-        try row.set(Properties.clientID, clientID)
-        try row.set(Properties.clientSecret, clientSecret)
-        try row.set(Properties.redirectURIs, redirectURIs?.joined(separator: " "))
-        try row.set(Properties.scopes, validScopes?.joined(separator: " "))
-        try row.set(Properties.confidentialClient, confidentialClient)
-        try row.set(Properties.firstParty, firstParty)
-        try row.set(Properties.allowedGrantType, allowedGrantType.rawValue)
-        
-        return row
+    @Field(key: "allowed_grant_type")
+    public var allowedGrantType: OAuthFlowType
+
+    public init() {}
+
+    public init(clientID: String,
+                redirectURIs: [String]?,
+                clientSecret: String?,
+                validScopes: [String]?,
+                confidentialClient: Bool?,
+                firstParty: Bool,
+                allowedGrantType: OAuthFlowType) {
+        self.id = clientID
+        self.clientID = clientID
+        self.redirectURIs = redirectURIs
+        self.clientSecret = clientSecret
+        self.validScopes = validScopes
+        self.confidentialClient = confidentialClient
+        self.firstParty = firstParty
+        self.allowedGrantType = allowedGrantType
     }
 }
 
-extension OAuthClient: Preparation {
-    public static func prepare(_ database: Database) throws {
-        try database.create(self) { builder in
-            builder.id()
-            builder.string(Properties.clientID)
-            builder.string(Properties.redirectURIs, optional: true)
-            builder.string(Properties.clientSecret, optional: true)
-            builder.string(Properties.scopes, optional: true)
-            builder.bool(Properties.confidentialClient, optional: true)
-            builder.bool(Properties.firstParty)
-            builder.string(Properties.allowedGrantType)
+extension FluentOAuthClient {
+    public var oAuthClient: OAuthClient {
+        return OAuthClient(
+            clientID: clientID,
+            redirectURIs: redirectURIs,
+            clientSecret: clientSecret,
+            validScopes: validScopes,
+            confidential: confidentialClient,
+            firstParty: firstParty,
+            allowedGrantType: allowedGrantType
+        )
+    }
+}
+
+extension FluentOAuthClient {
+    struct Create: AsyncMigration {
+        func prepare(on database: Database) async throws {
+            try await database.schema(FluentOAuthClient.schema)
+                .compositeIdentifier(over: "client_id")
+                .field("client_id", .string, .required)
+                .field("redirect_uris", .array(of: .string))
+                .field("client_secret", .string)
+                .field("scopes", .array(of: .string))
+                .field("confidential_client", .bool)
+                .field("first_party", .bool, .required)
+                .field("allowed_grant_type", .string, .required)
+                .create()
+            try await (database as? SQLDatabase)?
+                .create(index: "oauth_client_index")
+                .on(FluentOAuthClient.schema)
+                .column("client_id")
+                .run()
         }
 
-        try database.index(Properties.clientID, for: OAuthClient.self)
+        func revert(on database: Database) async throws {
+            try await (database as? SQLDatabase)?
+                .drop(index: "oauth_client_index")
+                .run()
+            try await database.schema(FluentOAuthClient.schema).delete()
+        }
     }
 
-    public static func revert(_ database: Database) throws {
-        try database.delete(self)
+    public static var migration: Migration {
+        Create()
     }
 }

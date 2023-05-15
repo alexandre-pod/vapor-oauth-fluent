@@ -1,11 +1,15 @@
 import VaporOAuth
+import FluentKit
 
 public struct FluentResourceServerRetriever: ResourceServerRetriever {
 
-    public init() { }
+    private let database: Database
 
-    public func getServer(_ username: String) -> OAuthResourceServer? {
-        return (try? OAuthResourceServer.makeQuery().filter(OAuthResourceServer.Properties.username, username).first()) ?? nil
+    public init(database: Database) {
+        self.database = database
     }
 
+    public func getServer(_ username: String) -> OAuthResourceServer? {
+        return try? FluentOAuthResourceServer.find(username, on: database).wait()?.oAuthResourceServer
+    }
 }

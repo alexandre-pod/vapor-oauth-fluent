@@ -1,11 +1,15 @@
 import VaporOAuth
-import FluentProvider
+import FluentKit
 
 public struct FluentClientRetriever: ClientRetriever {
 
-    public init() {}
+    private let database: Database
 
-    public func getClient(clientID: String) -> OAuthClient? {
-        return (try? OAuthClient.makeQuery().filter(OAuthClient.Properties.clientID, clientID).first()) ?? nil
+    public init(database: Database) {
+        self.database = database
+    }
+
+    public func getClient(clientID: String) async throws -> OAuthClient? {
+        return try await FluentOAuthClient.find(clientID, on: database)?.oAuthClient
     }
 }

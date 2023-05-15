@@ -1,69 +1,77 @@
-import FluentProvider
+import Vapor
 import VaporOAuth
-import AuthProvider
+import FluentKit
+import SQLKit
 
-extension OAuthUser: Model {
+public final class FluentOAuthUser: Model {
+    public static let schema = "oauth_user"
 
-    struct Properties {
-        static let username = "username"
-        static let emailAddress = "email_address"
-        static let password = "password"
-    }
+    @ID(custom: "username", generatedBy: .user)
+    public var id: String?
 
-    public var storage: Storage {
-        if let storage = extend["fluent-storage"] as? Storage {
-            return storage
-        } else {
-            let storage = Storage()
-            extend["fluent-storage"] = storage
-            return storage
-        }
-    }
+    @Field(key: "username")
+    public var username: String
 
-    public convenience init(row: Row) throws {
-        let username: String = try row.get(Properties.username)
-        let emailAddress: String? = try? row.get(Properties.emailAddress)
-        let passwordAsString: String = try row.get(Properties.password)
-        self.init(username: username, emailAddress: emailAddress, password: passwordAsString.makeBytes())
-    }
+    @OptionalField(key: "email_address")
+    public var emailAddress: String?
 
-    public func makeRow() throws -> Row {
-        var row = Row()
+    @Field(key: "password")
+    public var password: String
 
-        try row.set(Properties.username, username)
-        try row.set(Properties.password, password.makeString())
-        try row.set(Properties.emailAddress, emailAddress)
+    public init() {}
 
-        return row
+    public init(username: String,
+                emailAddress: String?,
+                password: String) {
+        self.id = username
+        self.username = username
+        self.emailAddress = emailAddress
+        self.password = password
     }
 }
 
-extension OAuthUser: Preparation {
-    public static func prepare(_ database: Database) throws {
-        try database.create(self) { builder in
-            builder.id()
-            builder.string(Properties.username)
-            builder.string(Properties.password)
-            builder.string(Properties.emailAddress, optional: true)
-        }
-    }
-
-    public static func revert(_ database: Database) throws {
-        try database.delete(self)
+extension FluentOAuthUser {
+    public var oAuthUser: OAuthUser {
+        OAuthUser(
+            userID: id,
+            username: username,
+            emailAddress: emailAddress,
+            password: password
+        )
     }
 }
 
-extension OAuthUser: SessionPersistable {}
+extension FluentOAuthUser {
+    struct Create: AsyncMigration {
+        func prepare(on database: Database) async throws {
+            try await database.schema(FluentOAuthUser.schema)
+                .compositeIdentifier(over: "username")
+                .field("username", .string, .required)
+                .field("email_address", .string)
+                .field("password", .string, .required)
+                .create()
+            try await (database as? SQLDatabase)?
+                .create(index: "oauth_user_index")
+                .on(FluentOAuthUser.schema)
+                .column("username")
+                .run()
+        }
 
-public protocol PasswordHasherVerifier: PasswordVerifier, HashProtocol {}
-
-extension BCryptHasher: PasswordHasherVerifier {}
-
-extension OAuthUser: PasswordAuthenticatable {
-    public static let usernameKey = "username"
-    public static let passwordVerifier: PasswordVerifier? = OAuthUser.passwordHasher
-    public var hashedPassword: String? {
-        return password.makeString()
+        func revert(on database: Database) async throws {
+            try await (database as? SQLDatabase)?
+                .drop(index: "oauth_user_index")
+                .run()
+            try await database.schema(FluentOAuthUser.schema).delete()
+        }
     }
-    public internal(set) static var passwordHasher: PasswordHasherVerifier = BCryptHasher(cost: 10)
+
+    public static var migration: Migration {
+        Create()
+    }
+}
+
+extension OAuthUser: SessionAuthenticatable {
+    public var sessionID: String {
+        self.username
+    }
 }

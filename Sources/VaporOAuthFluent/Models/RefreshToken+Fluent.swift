@@ -1,67 +1,66 @@
-import FluentProvider
-import VaporOAuth
 import Foundation
+import VaporOAuth
+import FluentKit
+import SQLKit
 
-extension RefreshToken: Model {
+public final class FluentRefreshToken: Model, RefreshToken {
+    public static let schema = "oauth_refresh_token"
 
-    struct Properties {
-        static let tokenString = "refresh_token_string"
-        static let clientID = "client_id"
-        static let userID = "user_id"
-        static let scopes = "scopes"
-    }
+    @ID(custom: "refresh_token_string", generatedBy: .user)
+    public var id: String?
 
-    public var storage: Storage {
-        if let storage = extend["fluent-storage"] as? Storage {
-            return storage
-        } else {
-            let storage = Storage()
-            extend["fluent-storage"] = storage
-            return storage
-        }
-    }
+    @Field(key: "refresh_token_string")
+    public var tokenString: String
 
-    public convenience init(row: Row) throws {
-        let tokenString: String = try row.get(Properties.tokenString)
-        let clientID: String = try row.get(Properties.clientID)
-        let userID: Identifier? = try? row.get(Properties.userID)
-        let scopesString: String? = try? row.get(Properties.scopes)
+    @Field(key: "client_id")
+    public var clientID: String
 
-        let scopes: [String]?
+    @OptionalField(key: "user_id")
+    public var userID: String?
 
-        if let scopesSet = scopesString {
-            scopes = scopesSet.components(separatedBy: " ")
-        } else {
-            scopes = nil
-        }
+    @OptionalField(key: "scopes")
+    public var scopes: [String]?
 
-        self.init(tokenString: tokenString, clientID: clientID, userID: userID, scopes: scopes)
-    }
+    public init() {}
 
-    public func makeRow() throws -> Row {
-        var row = Row()
-        try row.set(Properties.tokenString, tokenString)
-        try row.set(Properties.clientID, clientID)
-        try row.set(Properties.userID, userID)
-        try row.set(Properties.scopes, scopes?.joined(separator: " "))
-        return row
+    public init(tokenString: String,
+                clientID: String,
+                userID: String?,
+                scopes: [String]?) {
+        self.id = tokenString
+        self.tokenString = tokenString
+        self.clientID = clientID
+        self.userID = userID
+        self.scopes = scopes
     }
 }
 
-extension RefreshToken: Preparation {
-    public static func prepare(_ database: Database) throws {
-        try database.create(self) { builder in
-            builder.id()
-            builder.string(Properties.tokenString)
-            builder.string(Properties.clientID)
-            builder.string(Properties.userID, optional: true)
-            builder.string(Properties.scopes, optional: true)
+extension FluentRefreshToken {
+    struct Create: AsyncMigration {
+        func prepare(on database: Database) async throws {
+            try await database.schema(FluentRefreshToken.schema)
+                .compositeIdentifier(over: "refresh_token_string")
+                .field("refresh_token_string", .string, .required)
+                .field("client_id", .string, .required)
+                .field("user_id", .string)
+                .field("scopes", .array(of: .string))
+                .create()
+            try await (database as? SQLDatabase)?
+                .create(index: "oauth_refresh_token_index")
+                .on(FluentRefreshToken.schema)
+                .column("refresh_token_string")
+                .run()
         }
 
-        try database.index(Properties.tokenString, for: RefreshToken.self)
+        func revert(on database: Database) async throws {
+            try await (database as? SQLDatabase)?
+                .drop(index: "oauth_refresh_token_index")
+                .run()
+            try await database.schema(FluentRefreshToken.schema).delete()
+        }
     }
 
-    public static func revert(_ database: Database) throws {
-        try database.delete(self)
+    public static var migration: Migration {
+        Create()
     }
 }
